@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, dev ]
+  pull_request:
+    branches: [ master ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  ubuntu-latest:
+    runs-on: ubuntu-24.04
+    name: Ubuntu 24.04
+    steps:
+     - name: Checkout
+       uses: actions/checkout@v6
+     # Runs a set of commands using the runners shell
+     - name: Start build
+       run: |
+          echo Beginning build
+          pwd
+          ls -la
+          sudo apt-get update
+          sudo apt-get install -y git wget automake pkg-config libtool m4 build-essential libncurses-dev
+          cd ..
+          git clone --depth 1 --recursive --shallow-submodule https://github.com/dinhvh/libetpan.git && cd libetpan
+          ./autogen.sh --with-poll > /dev/null || ./autogen.sh --with-poll
+          make -j$(nproc)
+          sudo make install
+          cd ../imapmv
+          make
+          sudo make install
+  debian-stable:
+    runs-on: ubuntu-latest
+    name: Debian 12
+    container: debian:12
+    steps:
+     - name: Checkout
+       uses: actions/checkout@v6
+     - name: Start build
+       run: |
+          apt-get update
+          apt-get install -y git wget automake pkg-config libtool m4 build-essential libncurses-dev
+          cd ..
+          git clone --depth 1 --recursive --shallow-submodule https://github.com/dinhvh/libetpan.git && cd libetpan
+          ./autogen.sh --with-poll > /dev/null || ./autogen.sh --with-poll
+          make -j$(nproc)
+          make install
+          cd ../imapmv
+          make
+          make install
+  debian-11:
+    runs-on: ubuntu-latest
+    name: Debian 11
+    container: debian:11
+    steps:
+     - name: Checkout
+       uses: actions/checkout@v6
+     - name: Start build
+       run: |
+          apt-get update
+          apt-get install -y git wget automake pkg-config libtool m4 build-essential libncurses-dev
+          cd ..
+          git clone --depth 1 --recursive --shallow-submodule https://github.com/dinhvh/libetpan.git && cd libetpan
+          ./autogen.sh --with-poll > /dev/null || ./autogen.sh --with-poll
+          make -j$(nproc)
+          make install
+          cd ../imapmv
+          make
+          make install
+  debian-10:
+    runs-on: ubuntu-latest
+    name: Debian 10
+    container: debian:10
+    steps:
+     - name: Checkout
+       uses: actions/checkout@v6
+     - name: Start build
+       run: |
+          sed -i 's|deb.debian.org/debian buster main|archive.debian.org/debian buster main|g' /etc/apt/sources.list
+          sed -i 's|deb.debian.org/debian buster-updates main|archive.debian.org/debian buster-updates main|g' /etc/apt/sources.list
+          sed -i 's|deb.debian.org/debian-security buster/updates main|archive.debian.org/debian-security buster/updates main|g' /etc/apt/sources.list
+          apt-get update
+          apt-get install -y git wget automake pkg-config libtool m4 build-essential libncurses-dev
+          cd ..
+          git clone --depth 1 --recursive --shallow-submodule https://github.com/dinhvh/libetpan.git && cd libetpan
+          ./autogen.sh --with-poll > /dev/null || ./autogen.sh --with-poll
+          make -j$(nproc)
+          make install
+          cd ../imapmv
+          make
+          make install
+  alpine-linux:
+    runs-on: ubuntu-latest
+    name: Alpine Linux
+    container: alpine:latest
+    steps:
+     - name: Checkout
+       uses: actions/checkout@v6
+     - name: Start build
+       run: |
+          apk update
+          apk add git gcc make autoconf automake pkgconf libtool m4 build-base ncurses-dev
+          cd ..
+          mkdir /usr/local/src
+          git clone --depth 1 --recursive --shallow-submodule https://github.com/dinhvh/libetpan.git && cd libetpan
+          ./autogen.sh --with-poll > /dev/null || ./autogen.sh --with-poll
+          make -j$(nproc)
+          make install
+          cd ../imapmv
+          make
+          make install
+  archlinux:
+    runs-on: ubuntu-24.04
+    name: Arch Linux
+    container: archlinux:latest
+    steps:
+     - name: Checkout
+       uses: actions/checkout@v6
+     - name: Start build
+       run: |
+          pacman -Syu --noconfirm
+          pacman -Sy --noconfirm git make patch gawk gcc pkg-config autoconf automake m4 libtool libnewt wget
+          cd ..
+          git clone --depth 1 --recursive --shallow-submodule https://github.com/dinhvh/libetpan.git && cd libetpan
+          ./autogen.sh --with-poll > /dev/null || ./autogen.sh --with-poll
+          make -j$(nproc)
+          make install
+          cd ../imapmv
+          make
+          make install
+  freebsd-14:
+    runs-on: ubuntu-24.04
+    name: FreeBSD
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build LBBS
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          run: |
+            pkg install -y git gcc gmake autoconf automake pkgconf libtool m4 ncurses wget
+            cd ..
+            git clone --depth 1 --recursive --shallow-submodule https://github.com/dinhvh/libetpan.git && cd libetpan
+            ./autogen.sh --with-poll > /dev/null || ./autogen.sh --with-poll
+            gmake -j$(nproc)
+            gmake install
+            cd ../imapmv
+            gmake
+            gmake install
