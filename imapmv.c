@@ -25,6 +25,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <getopt.h>
+#include <signal.h>
 
 #include <libetpan/libetpan.h>
 
@@ -50,6 +51,8 @@ static int secure2;
 /* Cumulative counters */
 static int total_msg = 0;
 static size_t total_bytes = 0;
+
+static int do_abort = 0;
 
 struct imap_client {
 	struct mailimap *imap;
@@ -298,7 +301,7 @@ static int process_fetch(struct imap_client *c2, const char *f1, const char *f2,
 					}
 					if (hdr) {
 						const char *hdrend = strstr(hdr, "\r\n");
-						if (hdrlen) {
+						if (hdrend) {
 							hdrlen = hdrend - hdr;
 						} else {
 							hdr = "";
@@ -396,6 +399,7 @@ static int process_rule(struct imap_client *c1, struct imap_client *c2, const ch
 	int matched = 0, appended = 0;
 	struct mailimap_set *set;
 	struct mailimap_fetch_type *fetch_type = NULL;
+	struct mailimap_set *appendedset = NULL;
 	clist *fetch_result = NULL;
 
 	fprintf(stdout, "%s -> %s (%s)\n", f1, f2, filter);
@@ -408,6 +412,11 @@ static int process_rule(struct imap_client *c1, struct imap_client *c2, const ch
 	/* Search for all matching messages */
 	res = mailimap_uid_search_raw(c1->imap, filter, &uids);
 	if (MAILIMAP_ERROR(res)) {
+		if (do_abort) {
+			/* On ^C, the IMAP connection often gets interrupted as well (?), often, but not always, here */
+			fprintf(stderr, "** Aborted SEARCH due to interrupt\n");
+			return 0;
+		}
 		log_mailimap_warning(c1->imap, res, "SEARCH failed\n");
 		return -1;
 	}
@@ -453,15 +462,17 @@ static int process_rule(struct imap_client *c1, struct imap_client *c2, const ch
 
 	res = 0;
 	if (!dryrun) {
-		struct mailimap_set *appendedset = mailimap_set_new_empty();
-		for (cur = clist_begin(fetch_result); cur; cur = clist_next(cur)) {
-			uint32_t uid = 0;
-			struct mailimap_msg_att *msg_att = clist_content(cur);
-			/* Append the message */
-			if (process_fetch(c2, f1, f2, msg_att, &uid)) {
-				res = -1;
-				break;
-			}
+		appendedset = mailimap_set_new_empty();
+	}
+	for (cur = clist_begin(fetch_result); cur; cur = clist_next(cur)) {
+		uint32_t uid = 0;
+		struct mailimap_msg_att *msg_att = clist_content(cur);
+		/* Append the message */
+		if (process_fetch(c2, f1, f2, msg_att, &uid)) {
+			res = -1;
+			break;
+		}
+		if (!dryrun) {
 			/* Mark successfully appended messages for deletion */
 			res = mailimap_set_add_single(appendedset, uid);
 			if (MAILIMAP_ERROR(res)) {
@@ -469,7 +480,12 @@ static int process_rule(struct imap_client *c1, struct imap_client *c2, const ch
 			}
 			appended++;
 		}
+		if (do_abort) {
+			break;
+		}
+	}
 
+	if (!dryrun) {
 		/* Mark as deleted any messages that were successfully appended (even on failure, so we don't process the same message again next time) */
 		if (appended > 0) {
 			struct mailimap_flag_list *flag_list = mailimap_flag_list_new_empty();
@@ -673,6 +689,9 @@ static int process_rules(struct imap_client *c1, struct imap_client *c2)
 	while ((fgets(buf, sizeof(buf), fp))) {
 		char *rule = buf;
 		char *f1, *f2, *filter, *tmp;
+		if (rule[0] == '#') {
+			continue; /* Ignore fully commented lines */
+		}
 		f1 = strsep(&rule, ",");
 		f2 = strsep(&rule, ",");
 		filter = rule;
@@ -694,12 +713,25 @@ static int process_rules(struct imap_client *c1, struct imap_client *c2)
 				return -1;
 			}
 		}
+		if (do_abort) {
+			break;
+		}
 	}
 	if (rulesfile) {
 		fclose(fp);
 	}
 	return 0;
 }
+
+static void __sigint_handler(int sig)
+{
+	(void) sig;
+	do_abort = 1;
+}
+
+static struct sigaction sigint_handler = {
+	.sa_handler = __sigint_handler,
+};
 
 int main(int argc, char *argv[])
 {
@@ -713,13 +745,19 @@ int main(int argc, char *argv[])
 		goto cleanup;
 	}
 
+	/* Add a signal handler so we cleanly exit on interrupt rather than in the middle of processing a message */
+	sigaction(SIGINT, &sigint_handler, NULL);
+
 	if (process_rules(&c1, &c2)) {
 		goto cleanup;
 	}
+	if (do_abort) {
+		fprintf(stderr, "** Aborting processing due to ^C interrupt\n");
+	}
 	if (dryrun) {
-		fprintf(stdout, "DRY RUN: %d messages would have been moved (%lu bytes)\n", total_msg, total_bytes);
+		fprintf(stdout, "DRY RUN: %d message%s would have been moved (%lu bytes)\n", total_msg, total_msg == 1 ? "" : "s", total_bytes);
 	} else {
-		fprintf(stdout, "%d messages moved (%lu bytes)\n", total_msg, total_bytes);
+		fprintf(stdout, "%d message%s moved (%lu bytes)\n", total_msg, total_msg == 1 ? "" : "s", total_bytes);
 	}
 	res = 0;
 
